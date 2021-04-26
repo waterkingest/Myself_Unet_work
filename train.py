@@ -13,10 +13,13 @@ from torchvision import models
 from tqdm import tqdm
 
 from nets.unet import Unet
+from nets.deeplab import DeepLab
 from nets.unet_training import CE_Loss, Dice_loss
 from utils.dataloader import DeeplabDataset, deeplab_dataset_collate
 from utils.metrics import f_score
-
+from tensorboardX import SummaryWriter
+# 定义Summary_Writer
+writer = SummaryWriter('./runs') 
 
 def get_lr(optimizer):
     for param_group in optimizer.param_groups:
@@ -48,6 +51,8 @@ def fit_one_epoch(net,epoch,epoch_size,epoch_size_val,gen,genval,Epoch,cuda):
             optimizer.zero_grad()
             outputs = net(imgs)
             loss    = CE_Loss(outputs, pngs, num_classes = NUM_CLASSES)
+            ce_loss=loss
+            
             if dice_loss:
                 main_dice = Dice_loss(outputs, labels)
                 loss      = loss + main_dice
@@ -63,7 +68,6 @@ def fit_one_epoch(net,epoch,epoch_size,epoch_size_val,gen,genval,Epoch,cuda):
 
             total_loss += loss.item()
             total_f_score += _f_score.item()
-            
             waste_time = time.time() - start_time
             pbar.set_postfix(**{'total_loss': total_loss / (iteration + 1), 
                                 'f_score'   : total_f_score / (iteration + 1),
@@ -72,7 +76,9 @@ def fit_one_epoch(net,epoch,epoch_size,epoch_size_val,gen,genval,Epoch,cuda):
             pbar.update(1)
 
             start_time = time.time()
-
+    writer.add_scalar('Unet_CE_loss',ce_loss,epoch)
+    writer.add_scalar('Unet_total_loss',total_loss,epoch)
+    writer.add_scalar('Unet_acc',total_f_score,epoch)
     print('Start Validation')
     with tqdm(total=epoch_size_val, desc=f'Epoch {epoch + 1}/{Epoch}',postfix=dict,mininterval=0.3) as pbar:
         for iteration, batch in enumerate(genval):
@@ -83,12 +89,14 @@ def fit_one_epoch(net,epoch,epoch_size,epoch_size_val,gen,genval,Epoch,cuda):
                 imgs = Variable(torch.from_numpy(imgs).type(torch.FloatTensor))
                 pngs = Variable(torch.from_numpy(pngs).type(torch.FloatTensor)).long()
                 labels = Variable(torch.from_numpy(labels).type(torch.FloatTensor))
+                # print(imgs)
                 if cuda:
                     imgs = imgs.cuda()
                     pngs = pngs.cuda()
                     labels = labels.cuda()
 
                 outputs  = net(imgs)
+                # print(outputs)
                 val_loss = CE_Loss(outputs, pngs, num_classes = NUM_CLASSES)
                 if dice_loss:
                     main_dice = Dice_loss(outputs, labels)
@@ -112,7 +120,7 @@ def fit_one_epoch(net,epoch,epoch_size,epoch_size_val,gen,genval,Epoch,cuda):
     print('Total Loss: %.4f || Val Loss: %.4f ' % (total_loss/(epoch_size+1),val_toal_loss/(epoch_size_val+1)))
 
     print('Saving state, iter:', str(epoch+1))
-    torch.save(model.state_dict(), 'logs/Epoch%d-Total_Loss%.4f-Val_Loss%.4f.pth'%((epoch+1),total_loss/(epoch_size+1),val_toal_loss/(epoch_size_val+1)))
+    torch.save(model.state_dict(), 'logs/Unet_water/Epoch%d-Total_Loss%.4f-Val_Loss%.4f.pth'%((epoch+1),total_loss/(epoch_size+1),val_toal_loss/(epoch_size_val+1)))
 
 
 
@@ -126,14 +134,14 @@ if __name__ == "__main__":
     #   分类个数+1
     #   2+1
     #---------------------#
-    NUM_CLASSES = 21
+    NUM_CLASSES = 2
     #--------------------------------------------------------------------#
     #   建议选项：
     #   种类少（几类）时，设置为True
     #   种类多（十几类）时，如果batch_size比较大（10以上），那么设置为True
     #   种类多（十几类）时，如果batch_size比较小（10以下），那么设置为False
     #---------------------------------------------------------------------# 
-    dice_loss = False
+    dice_loss = True
     #-------------------------------#
     #   主干网络预训练权重的使用
     #-------------------------------#
@@ -143,13 +151,14 @@ if __name__ == "__main__":
     #-------------------------------#
     Cuda = True
 
-    model = Unet(num_classes=NUM_CLASSES, in_channels=inputs_size[-1], pretrained=pretrained).train()
+    model = Unet(num_classes=NUM_CLASSES, in_channels=inputs_size[-1], pretrained=pretrained).train()#Unet网络
+    # model=DeepLab(num_classes=2).train()#Deeplab网络
     
     #-------------------------------------------#
     #   权值文件的下载请看README
     #   权值和主干特征提取网络一定要对应
     #-------------------------------------------#
-    model_path = r"model_data/unet_voc.pth"
+    model_path = r"logs\Unet_water\Epoch21-Total_Loss0.2174-Val_Loss0.2367.pth"
     print('Loading weights into state dict...')
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model_dict = model.state_dict()
@@ -164,11 +173,11 @@ if __name__ == "__main__":
         cudnn.benchmark = True
         net = net.cuda()
 
-    # 打开数据集的txt
+    # 打开训练数据集的txt
     with open(r"VOCdevkit/VOC2007/ImageSets/Segmentation/train.txt","r") as f:
         train_lines = f.readlines()
 
-    # 打开数据集的txt
+    # 打开验证数据集的txt
     with open(r"VOCdevkit/VOC2007/ImageSets/Segmentation/val.txt","r") as f:
         val_lines = f.readlines()
         
@@ -181,9 +190,9 @@ if __name__ == "__main__":
     #   提示OOM或者显存不足请调小Batch_size
     #------------------------------------------------------#
     if True:
-        lr = 1e-4
+        lr = 1e-5
         Init_Epoch = 0
-        Interval_Epoch = 50
+        Interval_Epoch = 25
         Batch_size = 2
         
         optimizer = optim.Adam(model.parameters(),lr)
@@ -208,8 +217,8 @@ if __name__ == "__main__":
     
     if True:
         lr = 1e-5
-        Interval_Epoch = 50
-        Epoch = 100
+        Interval_Epoch = 25
+        Epoch = 50
         Batch_size = 2
 
         optimizer = optim.Adam(model.parameters(),lr)

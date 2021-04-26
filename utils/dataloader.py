@@ -108,7 +108,7 @@ class DeeplabDataset(Dataset):
         annotation_line = self.train_lines[index]
         name = annotation_line.split()[0]
         # 从文件中读取图像
-        jpg = Image.open(r"./VOCdevkit/VOC2007/JPEGImages" + '/' + name + ".jpg")
+        jpg = Image.open(r"./VOCdevkit/VOC2007/JPEGImages" + '/' + name + ".png")
         png = Image.open(r"./VOCdevkit/VOC2007/SegmentationClass" + '/' + name + ".png")
 
         if self.random_data:
@@ -118,8 +118,13 @@ class DeeplabDataset(Dataset):
 
         # 从文件中读取图像
         png = np.array(png)
-        png[png >= self.num_classes] = self.num_classes
-        
+        if self.num_classes==2:
+            png[png==255]=1
+            png[png==128]=0
+        else:
+            png[png >= self.num_classes] = self.num_classes
+        # print(png)
+        # return False
         # 转化成one_hot的形式
         seg_labels = np.eye(self.num_classes+1)[png.reshape([-1])]
         seg_labels = seg_labels.reshape((int(self.image_size[1]),int(self.image_size[0]),self.num_classes+1))

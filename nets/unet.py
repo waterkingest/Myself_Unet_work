@@ -4,6 +4,10 @@ import torch.nn.functional as F
 from torchsummary import summary
 from nets.vgg import VGG16
 
+import torchvision.utils as vutils
+# from tensorboardX import SummaryWriter
+# # 定义Summary_Writer
+# writer = SummaryWriter('./runs') 
 
 class unetUp(nn.Module):
     def __init__(self, in_size, out_size):
@@ -21,11 +25,21 @@ class unetUp(nn.Module):
 
 
 class Unet(nn.Module):
-    def __init__(self, num_classes=21, in_channels=3, pretrained=False):
+    def addimage(self,images,name):#可视化featuremap
+        if self.record:
+            x1 = images.transpose(0, 1)  # C，B, H, W  ---> B，C, H, W
+            print(x1.size())
+            img_grid = vutils.make_grid(x1, normalize=True, scale_each=True, nrow=4)  # normalize进行归一化处理
+            writer.add_image(f'{name}_feature_maps', img_grid, global_step=0)
+            print('finish')
+        else:
+            pass
+    def __init__(self, num_classes=21, in_channels=3, pretrained=False,record=False):
         super(Unet, self).__init__()
         self.vgg = VGG16(pretrained=pretrained,in_channels=in_channels)
         in_filters = [192, 384, 768, 1024]
         out_filters = [64, 128, 256, 512]
+        self.record=record
         # upsampling
         # 64,64,512
         self.up_concat4 = unetUp(in_filters[3], out_filters[3])
@@ -41,18 +55,26 @@ class Unet(nn.Module):
 
     def forward(self, inputs):
         feat1 = self.vgg.features[  :4 ](inputs)
+        self.addimage(feat1,'vgg1')
         feat2 = self.vgg.features[4 :9 ](feat1)
+        self.addimage(feat2,'vgg2')
         feat3 = self.vgg.features[9 :16](feat2)
+        self.addimage(feat3,'vgg3')
         feat4 = self.vgg.features[16:23](feat3)
+        self.addimage(feat4,'vgg4')
         feat5 = self.vgg.features[23:-1](feat4)
-
+        self.addimage(feat5,'vgg5')
         up4 = self.up_concat4(feat4, feat5)
+        self.addimage(up4,'up4')
         up3 = self.up_concat3(feat3, up4)
+        self.addimage(up3,'up3')
         up2 = self.up_concat2(feat2, up3)
+        self.addimage(up2,'up2')
         up1 = self.up_concat1(feat1, up2)
+        self.addimage(up1,'up1')
 
         final = self.final(up1)
-        
+        # writer.close()
         return final
 
     def _initialize_weights(self, *stages):

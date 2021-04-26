@@ -3,10 +3,10 @@
 #--------------------------------------------#
 import torch
 from torchsummary import summary
-
+from nets.deeplab import *
 from nets.unet import Unet
 
 if __name__ == "__main__":
-    model = Unet(num_classes=2).train().cuda()
-
+    #model = Unet(num_classes=2).train().cuda()
+    model=DeepLab(num_classes=2).train().cuda()
     summary(model,(3,512,512))

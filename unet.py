@@ -8,7 +8,7 @@ import torch.nn.functional as F
 from PIL import Image
 from torch import nn
 from torch.autograd import Variable
-
+from torchsummary import summary
 from nets.unet import Unet as unet
 
 
@@ -20,15 +20,16 @@ from nets.unet import Unet as unet
 #--------------------------------------------#
 class Unet(object):
     _defaults = {
-        "model_path"        : 'model_data/unet_voc.pth',
+        "model_path"        : r'logs\Unet_water\Epoch2-Total_Loss0.3640-Val_Loss0.3495.pth',
         "model_image_size"  : (512, 512, 3),
-        "num_classes"       : 21,
+        "num_classes"       : 2,
         "cuda"              : True,
+        "original"          :True,#用来判断是否2值处理赋予新的颜色
         #--------------------------------#
         #   blend参数用于控制是否
         #   让识别结果和原图混合
         #--------------------------------#
-        "blend"             : True
+        "blend"             : False
     }
 
     #---------------------------------------------------#
@@ -44,7 +45,7 @@ class Unet(object):
     def generate(self):
         os.environ["CUDA_VISIBLE_DEVICES"] = '0'
         self.net = unet(num_classes=self.num_classes, in_channels=self.model_image_size[-1]).eval()
-
+        # summary(self.net.cuda(),(3,512,512))
         state_dict = torch.load(self.model_path)
         self.net.load_state_dict(state_dict)
 
@@ -55,7 +56,7 @@ class Unet(object):
         print('{} model loaded.'.format(self.model_path))
 
         if self.num_classes == 2:
-            self.colors = [(255, 255, 255),  (0, 0, 0)]
+            self.colors = [(0, 0, 0),  (0, 255, 0)]
         elif self.num_classes <= 21:
             self.colors = [(0, 0, 0), (128, 0, 0), (0, 128, 0), (128, 128, 0), (0, 0, 128), (128, 0, 128), (0, 128, 128), 
                     (128, 128, 128), (64, 0, 0), (192, 0, 0), (64, 128, 0), (192, 128, 0), (64, 0, 128), (192, 0, 128), 
@@ -95,7 +96,6 @@ class Unet(object):
 
         images = [np.array(image)/255]
         images = np.transpose(images,(0,3,1,2))
-
         with torch.no_grad():
             images = Variable(torch.from_numpy(images).type(torch.FloatTensor))
             if self.cuda:
@@ -104,7 +104,12 @@ class Unet(object):
             pr = self.net(images)[0]
             pr = F.softmax(pr.permute(1,2,0),dim = -1).cpu().numpy().argmax(axis=-1)
             pr = pr[int((self.model_image_size[0]-nh)//2):int((self.model_image_size[0]-nh)//2+nh), int((self.model_image_size[1]-nw)//2):int((self.model_image_size[1]-nw)//2+nw)]
-
+        if self.original:
+            image=pr*255
+            # print(image)
+            image = Image.fromarray(np.uint8(image)).resize((orininal_w,orininal_h))
+            image = image.convert('L')
+            return image
         seg_img = np.zeros((np.shape(pr)[0],np.shape(pr)[1],3))
         for c in range(self.num_classes):
             seg_img[:,:,0] += ((pr[:,: ] == c )*( self.colors[c][0] )).astype('uint8')
@@ -112,8 +117,26 @@ class Unet(object):
             seg_img[:,:,2] += ((pr[:,: ] == c )*( self.colors[c][2] )).astype('uint8')
 
         image = Image.fromarray(np.uint8(seg_img)).resize((orininal_w,orininal_h))
+        
+        img = image.convert("RGBA")
+        old_img=old_img.convert("RGBA")
+        datas = img.getdata()
+        newData = []
+        for item in datas:
+            if item[0] == 0 and item[1] == 0 and item[2] == 0:
+                newData.append((255, 255, 255, 0))
+            else:
+                item=list(item)
+                item[3]=50  #绿色透明度 0-255
+                item=tuple(item)
+                newData.append(item)
+        img.putdata(newData)
+        image=img
         if self.blend:
-            image = Image.blend(old_img,image,0.7)
+            image=Image.alpha_composite(old_img,image)  #是否混合图片
+        
+        # if self.blend:
+        #     image = Image.blend(old_img,image,0.5)
         
         return image
 
